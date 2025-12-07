@@ -1,117 +1,255 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "sonner";
 
-interface NoteItem {
+import { motion, AnimatePresence } from "framer-motion";
+
+// DnD Kit
+import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+
+import type { DragEndEvent } from "@dnd-kit/core"; // <-- IMPORTANT FIX
+
+import { CSS } from "@dnd-kit/utilities";
+
+interface Item {
+  id: string;
   text: string;
   completed: boolean;
 }
 
-interface Note {
-  _id: string;
-  title: string;
+
+interface SortableItemProps {
+  item: Item;
+  index: number;
   type: "bullet" | "checklist";
-  items: NoteItem[];
+  updateItem: (index: number, value: string) => void;
+  updateChecked: (index: number, value: boolean) => void;
+  deleteItem: (index: number) => void;
 }
 
-export default function HomePage() {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [loading, setLoading] = useState(true);
+function SortableItem({
+  item,
+  index,
+  type,
+  updateItem,
+  updateChecked,
+  deleteItem,
+}: SortableItemProps) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id: item.id });
 
-  // Fetch notes
-  useEffect(() => {
-    async function fetchNotes() {
-      try {
-        const res = await fetch("http://localhost:5000/api/notes");
-        const data = await res.json();
-        setNotes(data);
-      } catch (err) {
-        console.error("Error fetching notes:", err);
-      } finally {
-        setLoading(false);
-      }
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <motion.div
+      layout
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 mb-2 p-2 rounded-lg border shadow-sm hover:shadow-md transition"
+    >
+      {/* Drag Handle */}
+      <button
+        {...listeners}
+        {...attributes}
+        className="cursor-grab active:cursor-grabbing text-gray-500 hover:text-black"
+      >
+        ☰
+      </button>
+
+      {type === "checklist" && (
+        <Checkbox
+          checked={item.completed}
+          onCheckedChange={(checked: boolean | "indeterminate") =>
+            updateChecked(index, checked === true)
+          }
+        />
+      )}
+
+      <Input
+        value={item.text}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          updateItem(index, e.target.value)
+        }
+        placeholder={`Item ${index + 1}`}
+        className={item.completed ? "line-through text-gray-400" : ""}
+      />
+
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={() => deleteItem(index)}
+        disabled={index === 0}
+      >
+        -
+      </Button>
+    </motion.div>
+  );
+}
+
+export default function CreateNotePage() {
+  const [title, setTitle] = useState("");
+  const [type, setType] = useState<"bullet" | "checklist">("bullet");
+
+  const [items, setItems] = useState<Item[]>([
+    { id: crypto.randomUUID(), text: "", completed: false },
+  ]);
+
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  // Add item
+  const addItem = () => {
+    const newItem: Item = {
+      id: crypto.randomUUID(),
+      text: "",
+      completed: false,
+    };
+    setItems((prev) => [...prev, newItem]);
+  };
+
+  // Delete item
+  const deleteItem = (index: number) => {
+    if (items.length === 1) {
+      toast.error("At least one item is required.");
+      return;
+    }
+    setItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateItem = (index: number, value: string) => {
+    const updated = [...items];
+    updated[index].text = value;
+    setItems(updated);
+  };
+
+  const updateChecked = (index: number, value: boolean) => {
+    const updated = [...items];
+    updated[index].completed = value;
+    setItems(updated);
+  };
+
+  
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = items.findIndex((i) => i.id === active.id);
+    const newIndex = items.findIndex((i) => i.id === over.id);
+
+    const newOrder = [...items];
+    const [moved] = newOrder.splice(oldIndex, 1);
+    newOrder.splice(newIndex, 0, moved);
+
+    setItems(newOrder);
+  };
+
+  // Submit
+  async function handleSubmit() {
+    if (!title.trim()) {
+      return toast.error("Title is required.");
     }
 
-    fetchNotes();
-  }, []);
+    const filteredItems = items.filter((i) => i.text.trim() !== "");
 
-  // Delete handler
-  async function handleDelete(id: string) {
-    const confirmed = confirm("Are you sure you want to delete this note?");
-    if (!confirmed) return;
-
-    try {
-      await fetch(`http://localhost:5000/api/notes/${id}`, {
-        method: "DELETE",
-      });
-
-      // Remove from UI
-      setNotes((prev) => prev.filter((note) => note._id !== id));
-    } catch (error) {
-      console.error("Delete failed:", error);
+    if (filteredItems.length === 0) {
+      return toast.error("Add at least one valid item.");
     }
-  }
 
-  // Edit handler (actual edit page coming later)
-  function handleEdit(id: string) {
-    window.location.href = `/edit/${id}`;
-  }
+    const res = await fetch("http://localhost:5000/api/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        type,
+        items: filteredItems,
+      }),
+    });
 
-  if (loading) {
-    return <p className="text-center py-10">Loading notes...</p>;
-  }
-
-  if (notes.length === 0) {
-    return <p className="text-center py-10">No notes found. Create a new one!</p>;
+    if (res.ok) {
+      toast.success("Note created!");
+      window.location.href = "/";
+    } else {
+      toast.error("Failed to create note.");
+    }
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {notes.map((note) => (
-        <Card key={note._id} className="relative">
-          
-          {/* Edit & Delete Buttons */}
-          <div className="absolute top-3 right-3 flex gap-3 text-sm">
-            <button
-              onClick={() => handleEdit(note._id)}
-              className="text-blue-600 hover:underline"
-            >
-              Edit
-            </button>
+    <div className="max-w-2xl mx-auto">
+      <h1 className="text-2xl font-semibold mb-4">Create Note</h1>
 
-            <button
-              onClick={() => handleDelete(note._id)}
-              className="text-red-600 hover:underline"
-            >
-              Delete
-            </button>
-          </div>
+      <Input
+        placeholder="Note title..."
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        className="mb-4"
+      />
 
-          <CardHeader>
-            <CardTitle>{note.title}</CardTitle>
-          </CardHeader>
+      <div className="flex gap-4 mb-4">
+        <Button
+          variant={type === "bullet" ? "default" : "outline"}
+          onClick={() => setType("bullet")}
+        >
+          Bullet Note
+        </Button>
 
-          <CardContent>
-            {note.type === "bullet" ? (
-              <ul className="list-disc ml-5">
-                {note.items.map((item, index) => (
-                  <li key={index}>{item.text}</li>
-                ))}
-              </ul>
-            ) : (
-              <ul>
-                {note.items.map((item, index) => (
-                  <li key={index} className="flex gap-2 items-center">
-                    <input type="checkbox" checked={item.completed} readOnly />
-                    <span>{item.text}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+        <Button
+          variant={type === "checklist" ? "default" : "outline"}
+          onClick={() => setType("checklist")}
+        >
+          Checklist Note
+        </Button>
+      </div>
+
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={items} strategy={verticalListSortingStrategy}>
+          <AnimatePresence>
+            {items.map((item, index) => (
+              <SortableItem
+                key={item.id}
+                item={item}
+                index={index}
+                type={type}
+                updateItem={updateItem}
+                updateChecked={updateChecked}
+                deleteItem={deleteItem}
+              />
+            ))}
+          </AnimatePresence>
+        </SortableContext>
+      </DndContext>
+
+      <div className="flex gap-3 mt-2">
+        <Button variant="outline" onClick={addItem}>
+          + Add Item
+        </Button>
+      </div>
+
+      <Button onClick={handleSubmit} className="mt-5">
+        Save Note
+      </Button>
     </div>
   );
 }
