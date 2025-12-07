@@ -1,255 +1,73 @@
 "use client";
 
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
+import { useEffect, useState } from "react";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { toast } from "sonner";
 
-import { motion, AnimatePresence } from "framer-motion";
-
-// DnD Kit
-import {
-  closestCenter,
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-} from "@dnd-kit/sortable";
-
-import type { DragEndEvent } from "@dnd-kit/core"; // <-- IMPORTANT FIX
-
-import { CSS } from "@dnd-kit/utilities";
-
-interface Item {
-  id: string;
-  text: string;
-  completed: boolean;
+interface Note {
+  note_id: number;
+  title: string;
+  items: { text: string }[];
 }
 
+export default function DashboardPage() {
+  const [notes, setNotes] = useState<Note[]>([]);
 
-interface SortableItemProps {
-  item: Item;
-  index: number;
-  type: "bullet" | "checklist";
-  updateItem: (index: number, value: string) => void;
-  updateChecked: (index: number, value: boolean) => void;
-  deleteItem: (index: number) => void;
-}
+  useEffect(() => {
+    async function fetchNotes() {
+      try {
+        const res = await fetch("http://localhost:5000/api/notes");
+        const data = await res.json();
+        setNotes(data);
+      } catch (err) {
+        console.error("Failed to fetch notes", err);
+      }
+    }
 
-function SortableItem({
-  item,
-  index,
-  type,
-  updateItem,
-  updateChecked,
-  deleteItem,
-}: SortableItemProps) {
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: item.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
+    fetchNotes();
+  }, []);
 
   return (
-    <motion.div
-      layout
-      ref={setNodeRef}
-      style={style}
-      className="flex items-center gap-3 mb-2 p-2 rounded-lg border shadow-sm hover:shadow-md transition"
-    >
-      {/* Drag Handle */}
-      <button
-        {...listeners}
-        {...attributes}
-        className="cursor-grab active:cursor-grabbing text-gray-500 hover:text-black"
-      >
-        ☰
-      </button>
+    <div className="max-w-4xl mx-auto mt-10">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-semibold">Notes Dashboard</h1>
+        <Button onClick={() => (window.location.href = "/create")}>
+          New Note
+        </Button>
+      </div>
 
-      {type === "checklist" && (
-        <Checkbox
-          checked={item.completed}
-          onCheckedChange={(checked: boolean | "indeterminate") =>
-            updateChecked(index, checked === true)
-          }
-        />
+      {notes.length === 0 && (
+        <p className="text-gray-500 mt-10 text-center">No notes yet.</p>
       )}
 
-      <Input
-        value={item.text}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-          updateItem(index, e.target.value)
-        }
-        placeholder={`Item ${index + 1}`}
-        className={item.completed ? "line-through text-gray-400" : ""}
-      />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {notes.map((note, index) => (
+          <Card
+            key={`note-${note.note_id}-${index}`}
+            className="shadow-sm hover:shadow-md transition"
+          >
+            <CardHeader>
+              <CardTitle>{note.title}</CardTitle>
+            </CardHeader>
 
-      <Button
-        variant="destructive"
-        size="sm"
-        onClick={() => deleteItem(index)}
-        disabled={index === 0}
-      >
-        -
-      </Button>
-    </motion.div>
-  );
-}
+            <CardContent>
+              <ul className="list-disc ml-5 text-gray-600">
+                {note.items.slice(0, 3).map((item, i) => (
+                  <li key={`item-${note.note_id}-${i}`}>{item.text}</li>
+                ))}
+              </ul>
 
-export default function CreateNotePage() {
-  const [title, setTitle] = useState("");
-  const [type, setType] = useState<"bullet" | "checklist">("bullet");
-
-  const [items, setItems] = useState<Item[]>([
-    { id: crypto.randomUUID(), text: "", completed: false },
-  ]);
-
-  const sensors = useSensors(useSensor(PointerSensor));
-
-  // Add item
-  const addItem = () => {
-    const newItem: Item = {
-      id: crypto.randomUUID(),
-      text: "",
-      completed: false,
-    };
-    setItems((prev) => [...prev, newItem]);
-  };
-
-  // Delete item
-  const deleteItem = (index: number) => {
-    if (items.length === 1) {
-      toast.error("At least one item is required.");
-      return;
-    }
-    setItems((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const updateItem = (index: number, value: string) => {
-    const updated = [...items];
-    updated[index].text = value;
-    setItems(updated);
-  };
-
-  const updateChecked = (index: number, value: boolean) => {
-    const updated = [...items];
-    updated[index].completed = value;
-    setItems(updated);
-  };
-
-  
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = items.findIndex((i) => i.id === active.id);
-    const newIndex = items.findIndex((i) => i.id === over.id);
-
-    const newOrder = [...items];
-    const [moved] = newOrder.splice(oldIndex, 1);
-    newOrder.splice(newIndex, 0, moved);
-
-    setItems(newOrder);
-  };
-
-  // Submit
-  async function handleSubmit() {
-    if (!title.trim()) {
-      return toast.error("Title is required.");
-    }
-
-    const filteredItems = items.filter((i) => i.text.trim() !== "");
-
-    if (filteredItems.length === 0) {
-      return toast.error("Add at least one valid item.");
-    }
-
-    const res = await fetch("http://localhost:5000/api/notes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        type,
-        items: filteredItems,
-      }),
-    });
-
-    if (res.ok) {
-      toast.success("Note created!");
-      window.location.href = "/";
-    } else {
-      toast.error("Failed to create note.");
-    }
-  }
-
-  return (
-    <div className="max-w-2xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-4">Create Note</h1>
-
-      <Input
-        placeholder="Note title..."
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        className="mb-4"
-      />
-
-      <div className="flex gap-4 mb-4">
-        <Button
-          variant={type === "bullet" ? "default" : "outline"}
-          onClick={() => setType("bullet")}
-        >
-          Bullet Note
-        </Button>
-
-        <Button
-          variant={type === "checklist" ? "default" : "outline"}
-          onClick={() => setType("checklist")}
-        >
-          Checklist Note
-        </Button>
+              <Button
+                variant="outline"
+                className="mt-4"
+                onClick={() => (window.location.href = `/note/${note.note_id}`)}
+              >
+                View / Edit
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
       </div>
-
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext items={items} strategy={verticalListSortingStrategy}>
-          <AnimatePresence>
-            {items.map((item, index) => (
-              <SortableItem
-                key={item.id}
-                item={item}
-                index={index}
-                type={type}
-                updateItem={updateItem}
-                updateChecked={updateChecked}
-                deleteItem={deleteItem}
-              />
-            ))}
-          </AnimatePresence>
-        </SortableContext>
-      </DndContext>
-
-      <div className="flex gap-3 mt-2">
-        <Button variant="outline" onClick={addItem}>
-          + Add Item
-        </Button>
-      </div>
-
-      <Button onClick={handleSubmit} className="mt-5">
-        Save Note
-      </Button>
     </div>
   );
 }

@@ -1,81 +1,180 @@
 "use client";
 
-
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "sonner";
 import NoSSR from "@/components/NoSSR";
+
+
+import { motion, AnimatePresence } from "framer-motion";
+
+
+// DnD Kit
+import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+
+import type { DragEndEvent } from "@dnd-kit/core"; // <-- IMPORTANT FIX
+
+import { CSS } from "@dnd-kit/utilities";
+
+interface Item {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+
+interface SortableItemProps {
+  item: Item;
+  index: number;
+  type: "bullet" | "checklist";
+  updateItem: (index: number, value: string) => void;
+  updateChecked: (index: number, value: boolean) => void;
+  deleteItem: (index: number) => void;
+}
+
+function SortableItem({
+  item,
+  index,
+  type,
+  updateItem,
+  updateChecked,
+  deleteItem,
+}: SortableItemProps) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id: item.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <motion.div
+      layout
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 mb-2 p-2 rounded-lg border shadow-sm hover:shadow-md transition"
+    >
+      {/* Drag Handle */}
+      <button
+        {...listeners}
+        {...attributes}
+        className="cursor-grab active:cursor-grabbing text-gray-500 hover:text-black"
+      >
+        ☰
+      </button>
+
+      {type === "checklist" && (
+        <Checkbox
+          checked={item.completed}
+          onCheckedChange={(checked: boolean | "indeterminate") =>
+            updateChecked(index, checked === true)
+          }
+        />
+      )}
+
+      <Input
+        value={item.text}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          updateItem(index, e.target.value)
+        }
+        placeholder={`Item ${index + 1}`}
+        className={item.completed ? "line-through text-gray-400" : ""}
+      />
+
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={() => deleteItem(index)}
+        disabled={index === 0}
+      >
+        -
+      </Button>
+    </motion.div>
+  );
+}
 
 export default function CreateNotePage() {
   const [title, setTitle] = useState("");
   const [type, setType] = useState<"bullet" | "checklist">("bullet");
-  const [items, setItems] = useState([{ text: "", completed: false }]);
-  const [error, setError] = useState("");
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [items, setItems] = useState<Item[]>([
+    { id: crypto.randomUUID(), text: "", completed: false },
+  ]);
 
-  // Auto-scroll to bottom on new item
-  useEffect(() => {
-    containerRef.current?.scrollTo({ top: 9999, behavior: "smooth" });
-  }, [items.length]);
+  const sensors = useSensors(useSensor(PointerSensor));
 
-  // Add -item
+  // Add item
   const addItem = () => {
-    setItems([...items, { text: "", completed: false }]);
-    setError("");
+    const newItem: Item = {
+      id: crypto.randomUUID(),
+      text: "",
+      completed: false,
+    };
+    setItems((prev) => [...prev, newItem]);
   };
 
-  // Delete -item
+  // Delete item
   const deleteItem = (index: number) => {
     if (items.length === 1) {
-      setError("At least one item is required.");
+      toast.error("At least one item is required.");
       return;
     }
-    setItems(items.filter((_, i) => i !== index));
+    setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Move item -up
-  const moveUp = (index: number) => {
-    if (index === 0) return;
-    const updated = [...items];
-    [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]];
-    setItems(updated);
-  };
-
-  // Move item -down
-  const moveDown = (index: number) => {
-    if (index === items.length - 1) return;
-    const updated = [...items];
-    [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]];
-    setItems(updated);
-  };
-
-  // Update item text
   const updateItem = (index: number, value: string) => {
     const updated = [...items];
     updated[index].text = value;
     setItems(updated);
   };
 
-  // Update checklist checkbox
   const updateChecked = (index: number, value: boolean) => {
     const updated = [...items];
     updated[index].completed = value;
     setItems(updated);
   };
 
-  // Submit form
+  
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = items.findIndex((i) => i.id === active.id);
+    const newIndex = items.findIndex((i) => i.id === over.id);
+
+    const newOrder = [...items];
+    const [moved] = newOrder.splice(oldIndex, 1);
+    newOrder.splice(newIndex, 0, moved);
+
+    setItems(newOrder);
+  };
+
+  // Submit
   async function handleSubmit() {
     if (!title.trim()) {
-      alert("Title is required");
-      return;
+      return toast.error("Title is required.");
     }
 
-    const filtered = items.filter((i) => i.text.trim() !== "");
-    if (filtered.length === 0) {
-      setError("At least one non-empty item is required.");
-      return;
+    const filteredItems = items.filter((i) => i.text.trim() !== "");
+
+    if (filteredItems.length === 0) {
+      return toast.error("Add at least one valid item.");
     }
 
     const res = await fetch("http://localhost:5000/api/notes", {
@@ -84,19 +183,22 @@ export default function CreateNotePage() {
       body: JSON.stringify({
         title,
         type,
-        items: filtered,
+        items: filteredItems,
       }),
     });
 
-    if (res.ok) window.location.href = "/";
-    else alert("Failed to create note");
+    if (res.ok) {
+      toast.success("Note created!");
+      window.location.href = "/";
+    } else {
+      toast.error("Failed to create note.");
+    }
   }
 
   return (
-    <div className="max-w-2xl mx-auto pb-20">
-      <h1 className="text-2xl font-semibold mb-6">Create Note</h1>
+    <div className="max-w-2xl mx-auto">
+      <h1 className="text-2xl font-semibold mb-4">Create Note</h1>
 
-      {/* Title */}
       <Input
         placeholder="Note title..."
         value={title}
@@ -104,8 +206,7 @@ export default function CreateNotePage() {
         className="mb-4"
       />
 
-      {/* Note Type */}
-      <div className="flex gap-4 mb-6">
+      <div className="flex gap-4 mb-4">
         <Button
           variant={type === "bullet" ? "default" : "outline"}
           onClick={() => setType("bullet")}
@@ -121,81 +222,38 @@ export default function CreateNotePage() {
         </Button>
       </div>
 
-      {/* items selection */}
       <NoSSR>
-        <div ref={containerRef} className="mb-6 max-h-[400px] overflow-y-auto pr-2">
-          <h2 className="font-medium mb-3">Items</h2>
-
-          {/* {items.map((item, index) => ( */}
-          {items.map((item: { text: string; completed: boolean }, index: number) => (
-
-            <div
-              key={index}
-              className="flex items-center gap-3 mb-2 p-2 border rounded-md transition-all hover:bg-gray-50"
-            >
-              {/* Checklist Checkbox */}
-              {type === "checklist" && (
-                <Checkbox
-                  checked={item.completed}
-                  onCheckedChange={(checked: boolean | "indeterminate") =>
-                    updateChecked(index, checked === true)
-                  }
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={items} strategy={verticalListSortingStrategy}>
+            <AnimatePresence>
+              {items.map((item, index) => (
+                <SortableItem
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  type={type}
+                  updateItem={updateItem}
+                  updateChecked={updateChecked}
+                  deleteItem={deleteItem}
                 />
-              )}
-
-              {/* Input */}
-              <Input
-                value={item.text}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                  updateItem(index, e.target.value)}
-
-                placeholder={`Item ${index + 1}`}
-                className="transition-all"
-              />
-
-              {/* mpve-up */}
-              <Button
-                size="icon-sm"
-                variant="outline"
-                onClick={() => moveUp(index)}
-                className="rounded-full"
-              >
-                ↑
-              </Button>
-
-              {/* move-down */}
-              <Button
-                size="icon-sm"
-                variant="outline"
-                onClick={() => moveDown(index)}
-                className="rounded-full"
-              >
-                ↓
-              </Button>
-
-              {/* delete */}
-              <Button
-                size="icon-sm"
-                variant="destructive"
-                onClick={() => deleteItem(index)}
-                className="rounded-full px-3"
-              >
-                ✕
-              </Button>
-            </div>
-          ))}
-
-          {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
-
-          {/* add item*/}
-          <Button variant="outline" onClick={addItem} className="mt-2">
-            + Add Item
-          </Button>
-        </div>
+              ))}
+            </AnimatePresence>
+          </SortableContext>
+        </DndContext>
       </NoSSR>
 
-      {/* button - save */}
-      <Button onClick={handleSubmit} className="w-32">
+
+      <div className="flex gap-3 mt-2">
+        <Button variant="outline" onClick={addItem}>
+          + Add Item
+        </Button>
+      </div>
+
+      <Button onClick={handleSubmit} className="mt-5">
         Save Note
       </Button>
     </div>
