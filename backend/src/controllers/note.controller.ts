@@ -2,6 +2,16 @@ import { Request, Response } from "express";
 import { Note } from "../models/note.model";
 
 
+const formatNote = (note: any) => ({
+  note_id: note._id.toString(),
+  title: note.title,
+  type: note.type,
+  items: note.items,
+  createdAt: note.createdAt,
+  updatedAt: note.updatedAt,
+});
+
+
 export const createNote = async (req: Request, res: Response) => {
   try {
     const { title, type, items } = req.body;
@@ -11,18 +21,17 @@ export const createNote = async (req: Request, res: Response) => {
     }
 
     const note = await Note.create({ title, type, items });
-    return res.status(201).json(note);
+    return res.status(201).json(formatNote(note));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Server error" });
   }
 };
 
-
 export const getNotes = async (req: Request, res: Response) => {
   try {
     const notes = await Note.find().sort({ updatedAt: -1 });
-    return res.json(notes);
+    return res.json(notes.map(formatNote));
   } catch (error) {
     return res.status(500).json({ message: "Server error" });
   }
@@ -34,7 +43,7 @@ export const getNoteById = async (req: Request, res: Response) => {
     const note = await Note.findById(req.params.id);
     if (!note) return res.status(404).json({ message: "Note not found" });
 
-    return res.json(note);
+    return res.json(formatNote(note));
   } catch (error) {
     return res.status(500).json({ message: "Server error" });
   }
@@ -51,7 +60,7 @@ export const updateNote = async (req: Request, res: Response) => {
 
     if (!updated) return res.status(404).json({ message: "Note not found" });
 
-    return res.json(updated);
+    return res.json(formatNote(updated));
   } catch (error) {
     return res.status(500).json({ message: "Server error" });
   }
